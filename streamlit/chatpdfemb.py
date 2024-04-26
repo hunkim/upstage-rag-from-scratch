@@ -15,7 +15,10 @@ import tempfile, os
 
 from langchain import hub
 
-st.title("LangChain ChatDoc")
+st.title("LangChain Upstage Solar ChatDoc")
+st.write(
+    "This is a conversational AI that can chat with you about your documents! Get your KEY at https://console.upstage.ai/"
+)
 
 llm = Chat()
 # https://smith.langchain.com/hub/hunkim/rag-qa-with-history
