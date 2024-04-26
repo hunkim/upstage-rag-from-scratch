@@ -1,0 +1,8 @@
+openai
+requests 
+streamlit
+langchain
+langchain-upstage
+langchain-together
+langchainhub
+chromadb
