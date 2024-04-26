@@ -4,8 +4,8 @@ import streamlit as st
 from langchain_upstage import (
     UpstageLayoutAnalysisLoader,
     GroundednessCheck,
-    ChatUpstage as Chat,
-    UpstageEmbeddings as Embeddings,
+    ChatUpstage,
+    UpstageEmbeddings,
 )
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import AIMessage, HumanMessage
@@ -20,7 +20,7 @@ st.write(
     "This is a conversational AI that can chat with you about your documents! Get your KEY at https://console.upstage.ai/"
 )
 
-llm = Chat()
+llm = ChatUpstage()
 # https://smith.langchain.com/hub/hunkim/rag-qa-with-history
 chat_with_history_prompt = hub.pull("hunkim/rag-qa-with-history")
 
@@ -73,7 +73,7 @@ with st.sidebar:
             with st.status(f"Vectorizing {len(splits)} splits ..."):
                 # Embed
                 vectorstore = Chroma.from_documents(
-                    documents=splits, embedding=Embeddings()
+                    documents=splits, embedding=UpstageEmbeddings()
                 )
 
                 st.write("Vectorizing the document done!")
