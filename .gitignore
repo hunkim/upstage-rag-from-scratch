@@ -2,3 +2,4 @@
 .venv
 .streamlit
 .env
+.devcontainer
