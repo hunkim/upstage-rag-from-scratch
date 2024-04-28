@@ -3,14 +3,17 @@
 import streamlit as st
 from langchain_upstage import (
     UpstageLayoutAnalysisLoader,
-    GroundednessCheck,
+    UpstageGroundednessCheck,
     ChatUpstage,
     UpstageEmbeddings,
 )
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS
+from langchain.prompts import ChatPromptTemplate
+from langchain.load import dumps, loads
+
 import tempfile, os
 
 from langchain import hub
@@ -24,7 +27,7 @@ llm = ChatUpstage()
 # https://smith.langchain.com/hub/hunkim/rag-qa-with-history
 chat_with_history_prompt = hub.pull("hunkim/rag-qa-with-history")
 
-groundedness_check = GroundednessCheck()
+groundedness_check = UpstageGroundednessCheck()
 
 
 def get_response(user_query, chat_history, retrieved_docs):
@@ -33,10 +36,71 @@ def get_response(user_query, chat_history, retrieved_docs):
     return chain.stream(
         {
             "chat_history": chat_history,
-            "question": user_query,
             "context": retrieved_docs,
+            "question": user_query,
         }
     )
+
+
+def query_expander(query):
+    # Multi Query: Different Perspectives
+    multi_query_template = """You are an AI language model assistant. Your task is to generate five 
+    different versions of the given user question to retrieve relevant documents from a vector 
+    database. By generating multiple perspectives on the user question, your goal is to help
+    the user overcome some of the limitations of the distance-based similarity search. 
+    Provide these alternative questions separated by newlines. Original question: {query}"""
+
+    # RAG-Fusion: Related
+    rag_fusion_template = """You are a helpful assistant that generates multiple search queries based on a single input query. \n
+    Generate multiple search queries related to: {query} \n
+    Output (4 queries):"""
+
+    # Decomposition
+    decomposition_template = """You are a helpful assistant that generates multiple sub-questions related to an input question. \n
+    The goal is to break down the input into a set of sub-problems / sub-questions that can be answers in isolation. \n
+    Generate multiple search queries related to: {query} \n
+    Output (3 queries):"""
+
+    query_expander_templates = [
+        multi_query_template,
+        rag_fusion_template,
+        decomposition_template,
+    ]
+
+    expanded_queries = []
+    for template in query_expander_templates:
+        prompt_perspectives = ChatPromptTemplate.from_template(template)
+
+        generate_queries = (
+            prompt_perspectives
+            | ChatUpstage(temperature=0)
+            | StrOutputParser()
+            | (lambda x: x.split("\n"))
+        )
+        expanded_queries += generate_queries.invoke({"query": query})
+
+    return expanded_queries
+
+
+def get_unique_union(documents: list[list]):
+    """Unique union of retrieved docs"""
+    # Flatten list of lists, and convert each Document to string
+    flattened_docs = [dumps(doc) for sublist in documents for doc in sublist]
+    # Get unique documents
+    unique_docs = list(set(flattened_docs))
+    # Return
+    return [loads(doc) for doc in unique_docs]
+
+
+def retrieve_multiple_queries(retriever, queries):
+    all_docs = []
+    for query in queries:
+        st.write(f"Retrieving for query: {query}")
+        docs = retriever.invoke(query)
+        all_docs.append(docs)
+
+    unique_docs = get_unique_union(all_docs)
+    return unique_docs
 
 
 if "messages" not in st.session_state:
@@ -46,7 +110,7 @@ if "retriever" not in st.session_state:
     st.session_state.retriever = None
 
 with st.sidebar:
-    st.header(f"Add your documents!")
+    st.header(f"Add your PDF!")
 
     uploaded_file = st.file_uploader("Choose your `.pdf` file", type="pdf")
 
@@ -72,13 +136,14 @@ with st.sidebar:
 
             with st.status(f"Vectorizing {len(splits)} splits ..."):
                 # Embed
-                vectorstore = Chroma.from_documents(
+                vectorstore = FAISS.from_documents(
                     documents=splits, embedding=UpstageEmbeddings()
                 )
 
                 st.write("Vectorizing the document done!")
 
                 st.session_state.retriever = vectorstore.as_retriever(k=10)
+
                 # processed
                 st.session_state[uploaded_file.name] = True
 
@@ -103,9 +168,15 @@ if prompt := st.chat_input("What is up?", disabled=not st.session_state.retrieve
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
+        with st.status("Expending queries..."):
+            expended_queries = query_expander(prompt)
+            st.write(expended_queries)
         with st.status("Getting context..."):
             st.write("Retrieving...")
-            retrieved_docs = st.session_state.retriever.invoke(prompt)
+            retrieved_docs = retrieve_multiple_queries(
+                st.session_state.retriever, expended_queries
+            )
+            # retrieved_docs = st.session_state.retriever.invoke(prompt)
             st.write(retrieved_docs)
 
         response = st.write_stream(
@@ -114,7 +185,7 @@ if prompt := st.chat_input("What is up?", disabled=not st.session_state.retrieve
         gc_result = groundedness_check.run(
             {
                 "context": f"Context:{retrieved_docs}\n\nQuestion{prompt}",
-                "query": response,
+                "answer": response,
             }
         )
 

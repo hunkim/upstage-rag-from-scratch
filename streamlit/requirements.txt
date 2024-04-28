@@ -5,4 +5,4 @@ langchain
 langchain-upstage
 langchain-together
 langchainhub
-chromadb
+faiss-cpu 
